@@ -1,4 +1,4 @@
-# Copyright 2014 Google Inc. All rights reserved.
+# Copyright 2014 Google LLC
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -10,7 +10,7 @@
 # copyright notice, this list of conditions and the following disclaimer
 # in the documentation and/or other materials provided with the
 # distribution.
-#     * Neither the name of Google Inc. nor the names of its
+#     * Neither the name of Google LLC nor the names of its
 # contributors may be used to endorse or promote products derived from
 # this software without specific prior written permission.
 #
@@ -51,6 +51,8 @@
         'contained_range_map.h',
         'convert_old_arm64_context.cc',
         'convert_old_arm64_context.h',
+        'disassembler_objdump.cc',
+        'disassembler_objdump.h',
         'disassembler_x86.cc',
         'disassembler_x86.h',
         'dump_context.cc',
@@ -147,6 +149,7 @@
         'basic_source_line_resolver_unittest.cc',
         'cfi_frame_info_unittest.cc',
         'contained_range_map_unittest.cc',
+        'disassembler_objdump_unittest.cc',
         'disassembler_x86_unittest.cc',
         'exploitability_unittest.cc',
         'fast_source_line_resolver_unittest.cc',
@@ -165,6 +168,8 @@
         'stackwalker_arm_unittest.cc',
         'stackwalker_mips_unittest.cc',
         'stackwalker_mips64_unittest.cc',
+        'stackwalker_riscv_unittest.cc',
+        'stackwalker_riscv64_unittest.cc',
         'stackwalker_unittest_utils.h',
         'stackwalker_x86_unittest.cc',
         'static_address_map_unittest.cc',

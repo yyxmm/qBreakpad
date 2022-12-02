@@ -1,4 +1,4 @@
-// Copyright (c) 2010 Google Inc. All Rights Reserved.
+// Copyright 2010 Google LLC
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -10,7 +10,7 @@
 // copyright notice, this list of conditions and the following disclaimer
 // in the documentation and/or other materials provided with the
 // distribution.
-//     * Neither the name of Google Inc. nor the names of its
+//     * Neither the name of Google LLC nor the names of its
 // contributors may be used to endorse or promote products derived from
 // this software without specific prior written permission.
 //
@@ -28,8 +28,8 @@
 
 // CFI reader author: Jim Blandy <jimb@mozilla.com> <jimb@red-bean.com>
 
-// Implementation of dwarf2reader::LineInfo, dwarf2reader::CompilationUnit,
-// and dwarf2reader::CallFrameInfo. See dwarf2reader.h for details.
+// Implementation of LineInfo, CompilationUnit,
+// and CallFrameInfo. See dwarf2reader.h for details.
 
 #include "common/dwarf/dwarf2reader.h"
 
@@ -37,6 +37,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <stack>
@@ -51,7 +52,7 @@
 #include "common/using_std_string.h"
 #include "google_breakpad/common/breakpad_types.h"
 
-namespace dwarf2reader {
+namespace google_breakpad {
 
 const SectionMap::const_iterator GetSectionByName(const SectionMap&
                                                   sections, const char *name) {
@@ -129,10 +130,13 @@ void CompilationUnit::ReadAbbrevs() {
   const uint64_t abbrev_length = iter->second.second - header_.abbrev_offset;
 #endif
 
+  uint64_t highest_number = 0;
+
   while (1) {
     CompilationUnit::Abbrev abbrev;
     size_t len;
     const uint64_t number = reader_->ReadUnsignedLEB128(abbrevptr, &len);
+    highest_number = std::max(highest_number, number);
 
     if (number == 0)
       break;
@@ -170,9 +174,17 @@ void CompilationUnit::ReadAbbrevs() {
                            value);
       abbrev.attributes.push_back(abbrev_attr);
     }
-    assert(abbrev.number == abbrevs_->size());
     abbrevs_->push_back(abbrev);
   }
+
+  // Account of cases where entries are out of order.
+  std::sort(abbrevs_->begin(), abbrevs_->end(),
+    [](const CompilationUnit::Abbrev& lhs, const CompilationUnit::Abbrev& rhs) {
+      return lhs.number < rhs.number;
+  });
+
+  // Ensure that there are no missing sections.
+  assert(abbrevs_->size() == highest_number + 1);
 }
 
 // Skips a single DIE's attributes.
@@ -456,8 +468,14 @@ uint64_t CompilationUnit::Start() {
 void CompilationUnit::ProcessFormStringIndex(
     uint64_t dieoffset, enum DwarfAttribute attr, enum DwarfForm form,
     uint64_t str_index) {
+  const size_t kStringOffsetsTableHeaderSize =
+      header_.version >= 5 ? (reader_->OffsetSize() == 8 ? 16 : 8) : 0;
+  const uint8_t* str_offsets_table_after_header = str_offsets_base_ ?
+      str_offsets_buffer_ + str_offsets_base_ :
+      str_offsets_buffer_ + kStringOffsetsTableHeaderSize;
   const uint8_t* offset_ptr =
-      str_offsets_buffer_ + str_offsets_base_ + str_index * reader_->OffsetSize();
+      str_offsets_table_after_header + str_index * reader_->OffsetSize();
+
   const uint64_t offset = reader_->ReadOffset(offset_ptr);
   if (offset >= string_buffer_length_) {
     return;
@@ -467,11 +485,12 @@ void CompilationUnit::ProcessFormStringIndex(
   ProcessAttributeString(dieoffset, attr, form, str);
 }
 
-// Special function for pre-processing the DW_AT_str_offsets_base in a
-// DW_TAG_compile_unit die (for DWARF v5). We must make sure to find and
-// process the DW_AT_str_offsets_base attribute before attempting to read
-// any string attribute in the compile unit.
-const uint8_t* CompilationUnit::ProcessStrOffsetBaseAttribute(
+// Special function for pre-processing the
+// DW_AT_str_offsets_base and DW_AT_addr_base in a DW_TAG_compile_unit die (for
+// DWARF v5). We must make sure to find and process the
+// DW_AT_str_offsets_base and DW_AT_addr_base attributes before attempting to
+// read any string and address attribute in the compile unit.
+const uint8_t* CompilationUnit::ProcessOffsetBaseAttribute(
     uint64_t dieoffset, const uint8_t* start, enum DwarfAttribute attr,
     enum DwarfForm form, uint64_t implicit_const) {
   size_t len;
@@ -483,7 +502,7 @@ const uint8_t* CompilationUnit::ProcessStrOffsetBaseAttribute(
       form = static_cast<enum DwarfForm>(reader_->ReadUnsignedLEB128(start,
                                                                      &len));
       start += len;
-      return ProcessStrOffsetBaseAttribute(dieoffset, start, attr, form,
+      return ProcessOffsetBaseAttribute(dieoffset, start, attr, form,
 					   implicit_const);
 
     case DW_FORM_flag_present:
@@ -516,11 +535,12 @@ const uint8_t* CompilationUnit::ProcessStrOffsetBaseAttribute(
 
     // This is the important one here!
     case DW_FORM_sec_offset:
-      if (attr == dwarf2reader::DW_AT_str_offsets_base)
-	ProcessAttributeUnsigned(dieoffset, attr, form,
-				 reader_->ReadOffset(start));
+      if (attr == DW_AT_str_offsets_base ||
+          attr == DW_AT_addr_base)
+        ProcessAttributeUnsigned(dieoffset, attr, form,
+                                 reader_->ReadOffset(start));
       else
-	reader_->ReadOffset(start);
+        reader_->ReadOffset(start);
       return start + reader_->OffsetSize();
 
     case DW_FORM_ref1:
@@ -858,16 +878,16 @@ const uint8_t* CompilationUnit::ProcessDIE(uint64_t dieoffset,
                                            const uint8_t* start,
                                            const Abbrev& abbrev) {
   // With DWARF v5, the compile_unit die may contain a
-  // DW_AT_str_offsets_base.  If it does, that attribute must be found
-  // and processed before trying to process the other attributes; otherwise
-  // the string values will all come out incorrect.
+  // DW_AT_str_offsets_base or DW_AT_addr_base.  If it does, that attribute must
+  // be found and processed before trying to process the other attributes;
+  // otherwise the string or address values will all come out incorrect.
   if (abbrev.tag == DW_TAG_compile_unit && header_.version == 5) {
     uint64_t dieoffset_copy = dieoffset;
     const uint8_t* start_copy = start;
     for (AttributeList::const_iterator i = abbrev.attributes.begin();
 	 i != abbrev.attributes.end();
 	 i++) {
-      start_copy = ProcessStrOffsetBaseAttribute(dieoffset_copy, start_copy,
+      start_copy = ProcessOffsetBaseAttribute(dieoffset_copy, start_copy,
 						 i->attr_, i->form_,
 						 i->value_);
     }
@@ -907,7 +927,7 @@ void CompilationUnit::ProcessDIEs() {
     lengthstart += 4;
 
   std::stack<uint64_t> die_stack;
-  
+
   while (dieptr < (lengthstart + header_.length)) {
     // We give the user the absolute offset from the beginning of
     // debug_info, since they need it to deal with ref_addr forms.
@@ -933,8 +953,23 @@ void CompilationUnit::ProcessDIEs() {
     const enum DwarfTag tag = abbrev.tag;
     if (!handler_->StartDIE(absolute_offset, tag)) {
       dieptr = SkipDIE(dieptr, abbrev);
+      if (!dieptr) {
+        fprintf(stderr,
+                "An error happens when skipping a DIE's attributes at offset "
+                "0x%" PRIx64
+                ". Stopped processing following DIEs in this CU.\n",
+                absolute_offset);
+        exit(1);
+      }
     } else {
       dieptr = ProcessDIE(absolute_offset, dieptr, abbrev);
+      if (!dieptr) {
+        fprintf(stderr,
+                "An error happens when processing a DIE at offset 0x%" PRIx64
+                ". Stopped processing following DIEs in this CU.\n",
+                absolute_offset);
+        exit(1);
+      }
     }
 
     if (abbrev.has_children) {
@@ -1698,7 +1733,7 @@ bool LineInfo::ProcessOneOpcode(ByteReader* reader,
           oplen += templen;
 
           if (handler) {
-            handler->DefineFile(filename, -1, static_cast<uint32_t>(dirindex), 
+            handler->DefineFile(filename, -1, static_cast<uint32_t>(dirindex),
                                 mod_time, filelength);
           }
         }
@@ -1760,7 +1795,7 @@ void LineInfo::ReadLines() {
                           pending_file_num, pending_line_num,
                           pending_column_num);
       if (lsm.end_sequence) {
-        lsm.Reset(header_.default_is_stmt);      
+        lsm.Reset(header_.default_is_stmt);
         have_pending_line = false;
       } else {
         pending_address = lsm.address;
@@ -1776,54 +1811,6 @@ void LineInfo::ReadLines() {
   after_header_ = lengthstart + header_.total_length;
 }
 
-bool RangeListReader::SetRangesBase(uint64_t offset) {
-  // Versions less than 5 don't use ranges base.
-  if (cu_info_->version_ < 5) {
-    return true;
-  }
-  // Length may not be 12 bytes, but if 12 bytes aren't available
-  // at this point, then the header is too short.
-  if (offset + 12 >= cu_info_->size_) {
-    return false;
-  }
-  // The length of this CU's contribution.
-  uint64_t cu_length = reader_->ReadFourBytes(cu_info_->buffer_ + offset);
-  offset += 4;
-  if (cu_length == 0xffffffffUL) {
-    cu_length = reader_->ReadEightBytes(cu_info_->buffer_ + offset);
-    offset += 8;
-  }
-
-  // Truncating size here results in correctly ignoring everything not from
-  // this cu from here on out.
-  cu_info_->size_ = offset + cu_length;
-
-  // Check for the rest of the header in advance.
-  if (offset + 8 >= cu_info_->size_) {
-    return false;
-  }
-  // Version. Can only read version 5.
-  if (reader_->ReadTwoBytes(cu_info_->buffer_ + offset) != 5) {
-    return false;
-  }
-  offset += 2;
-  // Address size
-  if (reader_->ReadOneByte(cu_info_->buffer_ + offset) !=
-      reader_->AddressSize()) {
-    return false;
-  }
-  offset += 1;
-  // Segment selectors are unsupported
-  if (reader_->ReadOneByte(cu_info_->buffer_ + offset) != 0) {
-    return false;
-  }
-  offset += 1;
-  offset_entry_count_ = reader_->ReadFourBytes(cu_info_->buffer_ + offset);
-  offset += 4;
-  offset_array_ = offset;
-  return true;
-}
-
 bool RangeListReader::ReadRanges(enum DwarfForm form, uint64_t data) {
   if (form == DW_FORM_sec_offset) {
     if (cu_info_->version_ <= 4) {
@@ -1832,15 +1819,12 @@ bool RangeListReader::ReadRanges(enum DwarfForm form, uint64_t data) {
       return ReadDebugRngList(data);
     }
   } else if (form == DW_FORM_rnglistx) {
-    SetRangesBase(cu_info_->ranges_base_);
-    if (data >= offset_entry_count_) {
-      return false;
-    }
-    uint64_t index_offset = reader_->AddressSize() * data;
+    offset_array_ = cu_info_->ranges_base_;
+    uint64_t index_offset = reader_->OffsetSize() * data;
     uint64_t range_list_offset =
-        reader_->ReadAddress(cu_info_->buffer_ + offset_array_ + index_offset);
+        reader_->ReadOffset(cu_info_->buffer_ + offset_array_ + index_offset);
 
-    return ReadDebugRngList(range_list_offset);
+    return ReadDebugRngList(offset_array_ + range_list_offset);
   }
   return false;
 }
@@ -2298,7 +2282,7 @@ class CallFrameInfo::State {
   // report the problem to reporter_ and return false.
   bool InterpretFDE(const FDE& fde);
 
- private:  
+ private:
   // The operands of a CFI instruction, for ParseOperands.
   struct Operands {
     unsigned register_number;  // A register number.
@@ -2559,19 +2543,19 @@ bool CallFrameInfo::State::DoInstruction() {
       if (!ParseOperands("1", &ops)) return false;
       address_ += ops.offset * cie->code_alignment_factor;
       break;
-      
+
     // Advance the address.
     case DW_CFA_advance_loc2:
       if (!ParseOperands("2", &ops)) return false;
       address_ += ops.offset * cie->code_alignment_factor;
       break;
-      
+
     // Advance the address.
     case DW_CFA_advance_loc4:
       if (!ParseOperands("4", &ops)) return false;
       address_ += ops.offset * cie->code_alignment_factor;
       break;
-      
+
     // Advance the address.
     case DW_CFA_MIPS_advance_loc8:
       if (!ParseOperands("8", &ops)) return false;
@@ -2752,23 +2736,32 @@ bool CallFrameInfo::State::DoInstruction() {
     case DW_CFA_nop:
       break;
 
-    // A SPARC register window save: Registers 8 through 15 (%o0-%o7)
-    // are saved in registers 24 through 31 (%i0-%i7), and registers
-    // 16 through 31 (%l0-%l7 and %i0-%i7) are saved at CFA offsets
-    // (0-15 * the register size). The register numbers must be
-    // hard-coded. A GNU extension, and not a pretty one.
+    // case DW_CFA_AARCH64_negate_ra_state
     case DW_CFA_GNU_window_save: {
-      // Save %o0-%o7 in %i0-%i7.
-      for (int i = 8; i < 16; i++)
-        if (!DoRule(i, new RegisterRule(i + 16)))
-          return false;
-      // Save %l0-%l7 and %i0-%i7 at the CFA.
-      for (int i = 16; i < 32; i++)
-        // Assume that the byte reader's address size is the same as
-        // the architecture's register size. !@#%*^ hilarious.
-        if (!DoRule(i, new OffsetRule(Handler::kCFARegister,
-                                      (i - 16) * reader_->AddressSize())))
-          return false;
+      if (handler_->Architecture() == "arm64") {
+        // Indicates that the return address, x30 has been signed.
+        // Breakpad will speculatively remove pointer-authentication codes when
+        // interpreting return addresses, regardless of this bit.
+      } else if (handler_->Architecture() == "sparc" ||
+                 handler_->Architecture() == "sparcv9") {
+        // A SPARC register window save: Registers 8 through 15 (%o0-%o7)
+        // are saved in registers 24 through 31 (%i0-%i7), and registers
+        // 16 through 31 (%l0-%l7 and %i0-%i7) are saved at CFA offsets
+        // (0-15 * the register size). The register numbers must be
+        // hard-coded. A GNU extension, and not a pretty one.
+
+        // Save %o0-%o7 in %i0-%i7.
+        for (int i = 8; i < 16; i++)
+          if (!DoRule(i, new RegisterRule(i + 16)))
+            return false;
+        // Save %l0-%l7 and %i0-%i7 at the CFA.
+        for (int i = 16; i < 32; i++)
+          // Assume that the byte reader's address size is the same as
+          // the architecture's register size. !@#%*^ hilarious.
+          if (!DoRule(i, new OffsetRule(Handler::kCFARegister,
+                                        (i - 16) * reader_->AddressSize())))
+            return false;
+      }
       break;
     }
 
@@ -2872,7 +2865,7 @@ bool CallFrameInfo::ReadEntryPrologue(const uint8_t* cursor, Entry* entry) {
   // Validate the length.
   if (length > size_t(buffer_end - cursor))
     return ReportIncomplete(entry);
- 
+
   // The length is the number of bytes after the initial length field;
   // we have that position handy at this point, so compute the end
   // now. (If we're parsing 64-bit-offset DWARF on a 32-bit machine,
@@ -2914,7 +2907,7 @@ bool CallFrameInfo::ReadEntryPrologue(const uint8_t* cursor, Entry* entry) {
 
   // Now advance cursor past the id.
    cursor += offset_size;
- 
+
   // The fields specific to this kind of entry start here.
   entry->fields = cursor;
 
@@ -3142,7 +3135,7 @@ bool CallFrameInfo::ReadFDEFields(FDE* fde) {
     if (size_t(fde->end - cursor) < size + data_size)
       return ReportIncomplete(fde);
     cursor += size;
-    
+
     // In the abstract, we should walk the augmentation string, and extract
     // items from the FDE's augmentation data as we encounter augmentation
     // string characters that specify their presence: the ordering of items
@@ -3180,7 +3173,7 @@ bool CallFrameInfo::ReadFDEFields(FDE* fde) {
 
   return true;
 }
-  
+
 bool CallFrameInfo::Start() {
   const uint8_t* buffer_end = buffer_ + buffer_length_;
   const uint8_t* cursor;
@@ -3237,7 +3230,7 @@ bool CallFrameInfo::Start() {
       reporter_->CIEPointerOutOfRange(fde.offset, fde.id);
       continue;
     }
-      
+
     CIE cie;
 
     // Parse this FDE's CIE header.
@@ -3276,7 +3269,7 @@ bool CallFrameInfo::Start() {
       ok = true;
       continue;
     }
-                         
+
     if (cie.has_z_augmentation) {
       // Report the personality routine address, if we have one.
       if (cie.has_z_personality) {
@@ -3463,4 +3456,4 @@ void CallFrameInfo::Reporter::ClearingCFARule(uint64_t offset,
           section_.c_str(), insn_offset);
 }
 
-}  // namespace dwarf2reader
+}  // namespace google_breakpad

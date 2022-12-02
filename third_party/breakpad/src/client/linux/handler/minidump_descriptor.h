@@ -1,5 +1,4 @@
-// Copyright (c) 2012 Google Inc.
-// All rights reserved.
+// Copyright 2012 Google LLC
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -11,7 +10,7 @@
 // copyright notice, this list of conditions and the following disclaimer
 // in the documentation and/or other materials provided with the
 // distribution.
-//     * Neither the name of Google Inc. nor the names of its
+//     * Neither the name of Google LLC nor the names of its
 // contributors may be used to endorse or promote products derived from
 // this software without specific prior written permission.
 //
@@ -33,6 +32,7 @@
 #include <assert.h>
 #include <sys/types.h>
 
+#include <cstdint>
 #include <string>
 
 #include "client/linux/handler/microdump_extra_info.h"
@@ -57,11 +57,10 @@ class MinidumpDescriptor {
         address_within_principal_mapping_(0),
         skip_dump_if_principal_mapping_not_referenced_(false) {}
 
-  explicit MinidumpDescriptor(const string& directory, const string& prefix = string())
+  explicit MinidumpDescriptor(const string& directory)
       : mode_(kWriteMinidumpToFile),
         fd_(-1),
         directory_(directory),
-        prefix_(prefix),
         c_path_(NULL),
         size_limit_(-1),
         address_within_principal_mapping_(0),
@@ -156,9 +155,6 @@ class MinidumpDescriptor {
 
   // The directory where the minidump should be generated.
   string directory_;
-
-  //
-  string prefix_;
 
   // The full path to the generated minidump.
   string path_;

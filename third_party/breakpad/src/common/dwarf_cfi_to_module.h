@@ -1,7 +1,6 @@
 // -*- mode: c++ -*-
 
-// Copyright (c) 2010, Google Inc.
-// All rights reserved.
+// Copyright 2010 Google LLC
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -13,7 +12,7 @@
 // copyright notice, this list of conditions and the following disclaimer
 // in the documentation and/or other materials provided with the
 // distribution.
-//     * Neither the name of Google Inc. nor the names of its
+//     * Neither the name of Google LLC nor the names of its
 // contributors may be used to endorse or promote products derived from
 // this software without specific prior written permission.
 //
@@ -52,7 +51,6 @@
 
 namespace google_breakpad {
 
-using dwarf2reader::CallFrameInfo;
 using google_breakpad::Module;
 using std::set;
 using std::vector;
@@ -121,7 +119,7 @@ class DwarfCFIToModule: public CallFrameInfo::Handler {
     static vector<string> MakeVector(const char* const* strings, size_t size);
   };
 
-  // Create a handler for the dwarf2reader::CallFrameInfo parser that
+  // Create a handler for the CallFrameInfo parser that
   // records the stack unwinding information it receives in MODULE.
   //
   // Use REGISTER_NAMES[I] as the name of register number I; *this
@@ -152,6 +150,8 @@ class DwarfCFIToModule: public CallFrameInfo::Handler {
   virtual bool ValExpressionRule(uint64_t address, int reg,
                                  const string& expression);
   virtual bool End();
+
+  virtual string Architecture();
 
  private:
   // Return the name to use for register REG.
