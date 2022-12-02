@@ -510,6 +510,8 @@ bool ExceptionHandler::GenerateDump(CrashContext* context) {
   stack += kChildStackSize;
   my_memset(stack - 16, 0, 16);
 
+  minidump_descriptor_.UpdatePath();
+
   ThreadArgument thread_arg;
   thread_arg.handler = this;
   thread_arg.minidump_descriptor = &minidump_descriptor_;
