@@ -57,10 +57,11 @@ class MinidumpDescriptor {
         address_within_principal_mapping_(0),
         skip_dump_if_principal_mapping_not_referenced_(false) {}
 
-  explicit MinidumpDescriptor(const string& directory)
+  explicit MinidumpDescriptor(const string& directory, const string& prefix = string())
       : mode_(kWriteMinidumpToFile),
         fd_(-1),
         directory_(directory),
+        prefix_(prefix),
         c_path_(NULL),
         size_limit_(-1),
         address_within_principal_mapping_(0),
@@ -155,6 +156,9 @@ class MinidumpDescriptor {
 
   // The directory where the minidump should be generated.
   string directory_;
+
+  //
+  string prefix_;
 
   // The full path to the generated minidump.
   string path_;

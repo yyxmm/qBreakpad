@@ -27,6 +27,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <stdio.h>
+#include <time.h>
 
 #include "client/linux/handler/minidump_descriptor.h"
 
@@ -42,6 +43,7 @@ MinidumpDescriptor::MinidumpDescriptor(const MinidumpDescriptor& descriptor)
     : mode_(descriptor.mode_),
       fd_(descriptor.fd_),
       directory_(descriptor.directory_),
+      prefix_(descriptor.prefix_),
       c_path_(NULL),
       size_limit_(descriptor.size_limit_),
       address_within_principal_mapping_(
@@ -63,6 +65,7 @@ MinidumpDescriptor& MinidumpDescriptor::operator=(
   mode_ = descriptor.mode_;
   fd_ = descriptor.fd_;
   directory_ = descriptor.directory_;
+  prefix_ = descriptor.prefix_;
   path_.clear();
   if (c_path_) {
     // This descriptor already had a path set, so generate a new one.
@@ -82,6 +85,7 @@ MinidumpDescriptor& MinidumpDescriptor::operator=(
 void MinidumpDescriptor::UpdatePath() {
   assert(mode_ == kWriteMinidumpToFile && !directory_.empty());
 
+#if 0
   GUID guid;
   char guid_str[kGUIDStringLength + 1];
   if (!CreateGUID(&guid) || !GUIDToString(&guid, guid_str, sizeof(guid_str))) {
@@ -91,6 +95,18 @@ void MinidumpDescriptor::UpdatePath() {
   path_.clear();
   path_ = directory_ + "/" + guid_str + ".dmp";
   c_path_ = path_.c_str();
+#else
+  char t_str[32] = { 0 };
+  time_t t;
+  struct tm st;
+  time(&t);
+  localtime_r(&t, &st);
+  strftime(t_str, sizeof(t_str), "%Y%m%d%H%M%S", &st);
+
+  path_.clear();
+  path_ = directory_ + "/" + prefix_ + "_" + t_str + ".dmp";
+  c_path_ = path_.c_str();
+#endif
 }
 
 }  // namespace google_breakpad

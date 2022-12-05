@@ -45,25 +45,25 @@ typedef struct Elf32_Chdr {
   typedef Elf32_Word Size;
   typedef Elf32_Addr Addr;
 
-  static_assert(sizeof (Type) == 4);
-  static_assert(sizeof (Size) == 4);
-  static_assert(sizeof (Addr) == 4);
+  static_assert(sizeof (Type) == 4, "");
+  static_assert(sizeof (Size) == 4, "");
+  static_assert(sizeof (Addr) == 4, "");
 
   Type ch_type;       // Compression type
   Size ch_size;       // Uncompressed data size in bytes
   Addr ch_addralign;  // Uncompressed data alignment
 } Elf32_Chdr;
 
-static_assert(sizeof (Elf32_Chdr) == 12);
+static_assert(sizeof (Elf32_Chdr) == 12, "");
 
 typedef struct Elf64_Chdr {
   typedef Elf64_Word  Type;
   typedef Elf64_Xword Size;
   typedef Elf64_Addr  Addr;
 
-  static_assert(sizeof (Type) == 4);
-  static_assert(sizeof (Size) == 8);
-  static_assert(sizeof (Addr) == 8);
+  static_assert(sizeof (Type) == 4, "");
+  static_assert(sizeof (Size) == 8, "");
+  static_assert(sizeof (Addr) == 8, "");
 
   Type ch_type;       // Compression type
   Type ch_reserved;   // Padding
@@ -71,7 +71,7 @@ typedef struct Elf64_Chdr {
   Addr ch_addralign;  // Uncompressed data alignment
 } Elf64_Chdr;
 
-static_assert(sizeof (Elf64_Chdr) == 24);
+static_assert(sizeof (Elf64_Chdr) == 24, "");
 
 // Traits classes so consumers can write templatized code to deal
 // with specific ELF bits.
